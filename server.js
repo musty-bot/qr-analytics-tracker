@@ -331,22 +331,31 @@ app.post('/api/qr/create', async (req, res) => {
   const qr_id = generateQRId();
   const short_code = generateShortCode();
 
-  db.get('SELECT COUNT(*) as count FROM qr_codes', (err, row) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-
-    if (row.count >= 10) {
+  try {
+    const count = await db.countQRCodes();
+    if (count >= 10) {
       return res.status(403).json({ error: 'Limit reached (10 QR codes). Contact admin.' });
     }
 
-    db.run(
-      'INSERT INTO qr_codes (qr_id, original_url, qr_url, short_code, title, qr_type, amount, paybill_number, till_number, pochi_number, reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [qr_id, qrData, qrData, short_code, title, qrType, data.amount || null, null, null, null, data.reference || null],
-      function (err) {
-        if (err) return res.status(500).json({ error: 'Failed to create QR code' });
-        res.json({ id: this.lastID, qr_id, short_code, url: qrData, title, qrType });
-      }
-    );
-  });
+    const qr = await db.createQRCode({
+      qr_id,
+      original_url: qrData,
+      qr_url: qrData,
+      short_code,
+      title,
+      qr_type: qrType,
+      amount: data.amount || null,
+      paybill_number: null,
+      till_number: null,
+      pochi_number: null,
+      reference: data.reference || null
+    });
+
+    res.json({ id: qr.id, qr_id, short_code, url: qrData, title, qrType });
+  } catch (e) {
+    console.error('Create QR error:', e);
+    res.status(500).json({ error: 'Failed to create QR code' });
+  }
 });
 
 app.post('/api/mpesa/create', async (req, res) => {
@@ -364,71 +373,106 @@ app.post('/api/mpesa/create', async (req, res) => {
   const short_code = generateShortCode();
   const titleFinal = title || `${paymentType.charAt(0).toUpperCase() + paymentType.slice(1)} Payment`;
 
-  db.get('SELECT COUNT(*) as count FROM qr_codes', (err, row) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-
-    if (row.count >= 10) {
+  try {
+    const count = await db.countQRCodes();
+    if (count >= 10) {
       return res.status(403).json({ error: 'Limit reached (10 QR codes). Contact admin.' });
     }
 
-    db.run(
-      'INSERT INTO qr_codes (qr_id, original_url, qr_url, short_code, title, qr_type, payment_type, amount, paybill_number, till_number, pochi_number, reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [qr_id, null, null, short_code, titleFinal, 'mpesa', paymentType, amount ? parseFloat(amount) : null, paymentType === 'paybill' ? number : null, paymentType === 'till' ? number : null, paymentType === 'pochi' ? number : null, reference || null],
-      async function (err) {
-        if (err) return res.status(500).json({ error: 'Failed to create QR code' });
+    const qr = await db.createQRCode({
+      qr_id,
+      original_url: null,
+      qr_url: null,
+      short_code,
+      title: titleFinal,
+      qr_type: 'mpesa',
+      payment_type: paymentType,
+      amount: amount ? parseFloat(amount) : null,
+      paybill_number: paymentType === 'paybill' ? number : null,
+      till_number: paymentType === 'till' ? number : null,
+      pochi_number: paymentType === 'pochi' ? number : null,
+      reference: reference || null
+    });
 
-        try {
-          const qrBase64 = await generateDynamicQR({ paymentType, number, amount, reference, title: titleFinal });
-          db.run('UPDATE qr_codes SET original_url = ?, qr_url = ? WHERE id = ?', [qrBase64, qrBase64, this.lastID]);
-          res.json({ id: this.lastID, qr_id, short_code, url: qrBase64, title: titleFinal, paymentType });
-        } catch (e) {
-          res.status(500).json({ error: e.message });
-        }
-      }
-    );
-  });
+    const qrBase64 = await generateDynamicQR({ paymentType, number, amount, reference, title: titleFinal });
+    await db.updateQRCode(qr.id, { original_url: qrBase64, qr_url: qrBase64 });
+
+    res.json({ id: qr.id, qr_id, short_code, url: qrBase64, title: titleFinal, paymentType });
+  } catch (e) {
+    console.error('M-Pesa QR error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.get('/api/qr/list', (req, res) => {
-  db.all('SELECT id, qr_id, short_code, original_url, qr_url, title, total_clicks, created_at, qr_type, payment_type, amount, paybill_number, till_number, pochi_number, reference FROM qr_codes ORDER BY created_at DESC', (err, rows) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
+app.get('/api/qr/list', async (req, res) => {
+  try {
+    const rows = await db.getQRCodes();
     res.json(rows);
-  });
+  } catch (e) {
+    console.error('List QR error:', e);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-app.get('/api/qr/:id/stats', (req, res) => {
+app.get('/api/qr/:id/stats', async (req, res) => {
   const { id } = req.params;
 
-  db.get('SELECT id, qr_id, short_code, original_url, qr_url, title, total_clicks, created_at, qr_type, payment_type, amount FROM qr_codes WHERE id = ?', [id], (err, qr) => {
-    if (err || !qr) return res.status(404).json({ error: 'QR code not found' });
+  try {
+    const qr = await db.getQRCodeById(id);
+    if (!qr) return res.status(404).json({ error: 'QR code not found' });
 
-    const stats = {};
-    const queries = [
-      `SELECT date(timestamp) as date, COUNT(*) as clicks FROM analytics WHERE qr_id = ? GROUP BY date ORDER BY date DESC LIMIT 30`,
-      `SELECT device_type, COUNT(*) as count FROM analytics WHERE qr_id = ? GROUP BY device_type`,
-      `SELECT browser_name, COUNT(*) as count FROM analytics WHERE qr_id = ? GROUP BY browser_name ORDER BY count DESC LIMIT 10`,
-      `SELECT country, city, COUNT(*) as count FROM analytics WHERE qr_id = ? GROUP BY country, city ORDER BY count DESC LIMIT 10`,
-      `SELECT ip_address, user_agent, device_type, browser_name, os_name, country, city, referer, timestamp FROM analytics WHERE qr_id = ? ORDER BY timestamp DESC LIMIT 50`
-    ];
+    const analytics = await db.getAnalytics(id);
 
-    let completed = 0;
-    queries.forEach((query, i) => {
-      db.all(query, [id], (err, rows) => {
-        if (!err) {
-          switch (i) {
-            case 0: stats.clicksOverTime = rows; break;
-            case 1: stats.deviceBreakdown = rows; break;
-            case 2: stats.browserBreakdown = rows; break;
-            case 3: stats.topLocations = rows; break;
-            case 4: stats.recentClicks = rows; break;
-          }
-        }
-        if (++completed === queries.length) {
-          res.json({ qr, stats });
-        }
-      });
+    const stats = {
+      clicksOverTime: [],
+      deviceBreakdown: [],
+      browserBreakdown: [],
+      topLocations: [],
+      recentClicks: analytics
+    };
+
+    const clicksByDate = {};
+    const deviceCounts = {};
+    const browserCounts = {};
+    const locationCounts = {};
+
+    analytics.forEach(click => {
+      const date = new Date(click.timestamp).toISOString().split('T')[0];
+      clicksByDate[date] = (clicksByDate[date] || 0) + 1;
+
+      deviceCounts[click.device_type] = (deviceCounts[click.device_type] || 0) + 1;
+      browserCounts[click.browser_name] = (browserCounts[click.browser_name] || 0) + 1;
+
+      const locKey = `${click.country}, ${click.city}`;
+      locationCounts[locKey] = (locationCounts[locKey] || 0) + 1;
     });
-  });
+
+    stats.clicksOverTime = Object.entries(clicksByDate)
+      .map(([date, clicks]) => ({ date, clicks }))
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 30);
+
+    stats.deviceBreakdown = Object.entries(deviceCounts)
+      .map(([device_type, count]) => ({ device_type, count }));
+
+    stats.browserBreakdown = Object.entries(browserCounts)
+      .map(([browser_name, count]) => ({ browser_name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    stats.topLocations = Object.entries(locationCounts)
+      .map(([loc, count]) => {
+        const [country, city] = loc.split(', ');
+        return { country, city, count };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    res.json({ qr, stats });
+  } catch (e) {
+    console.error('Stats error:', e);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 app.get('/r/:shortCode', async (req, res) => {
@@ -437,30 +481,43 @@ app.get('/r/:shortCode', async (req, res) => {
   const uaString = req.headers['user-agent'] || '';
   const referer = req.headers['referer'] || '';
 
-  db.get('SELECT * FROM qr_codes WHERE short_code = ?', [shortCode], async (err, row) => {
-    if (err || !row) return res.status(404).send('QR code not found');
+  try {
+    const row = await db.getQRCodeByShortCode(shortCode);
+    if (!row) return res.status(404).send('QR code not found');
 
     const ua = parseUserAgent(uaString);
     const location = await getLocationFromIP(ip);
 
-    db.run(
-      'INSERT INTO analytics (qr_id, ip_address, user_agent, device_type, browser_name, browser_version, os_name, country, city, referer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [row.id, ip, uaString, ua.device, ua.browser, ua.version, ua.os, location.country, location.city, referer],
-      () => {
-        db.run('UPDATE qr_codes SET total_clicks = total_clicks + 1 WHERE id = ?', [row.id]);
-      }
-    );
+    await db.addAnalytics({
+      qr_id: row.id,
+      ip_address: ip,
+      user_agent: uaString,
+      device_type: ua.device,
+      browser_name: ua.browser,
+      browser_version: ua.version,
+      os_name: ua.os,
+      country: location.country,
+      city: location.city,
+      referer
+    });
+
+    await db.incrementClicks(row.id);
 
     res.redirect(row.original_url);
-  });
+  } catch (e) {
+    console.error('Redirect error:', e);
+    res.status(500).send('Error processing QR code');
+  }
 });
 
-app.delete('/api/qr/:id', (req, res) => {
-  db.run('DELETE FROM qr_codes WHERE id = ?', [req.params.id], function (err) {
-    if (err || this.changes === 0) return res.status(404).json({ error: 'QR code not found' });
-    db.run('DELETE FROM analytics WHERE qr_id = ?', [req.params.id]);
+app.delete('/api/qr/:id', async (req, res) => {
+  try {
+    await db.deleteQRCode(req.params.id);
     res.json({ success: true });
-  });
+  } catch (e) {
+    console.error('Delete QR error:', e);
+    res.status(404).json({ error: 'QR code not found' });
+  }
 });
 
 app.get('/api/qr/:id/download', async (req, res) => {
@@ -468,27 +525,29 @@ app.get('/api/qr/:id/download', async (req, res) => {
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
 
-  db.get('SELECT original_url, qr_url, qr_type FROM qr_codes WHERE id = ?', [req.params.id], async (err, row) => {
-    if (err || !row) return res.status(404).send('QR code not found');
+  try {
+    const row = await db.getQRCodeById(req.params.id);
+    if (!row) return res.status(404).send('QR code not found');
 
-    try {
-      if (row.qr_type === 'mpesa') {
-        const qrBuffer = Buffer.from(row.original_url, 'base64');
-        res.type('png').send(qrBuffer);
-      } else {
-        const qrBuffer = await QRCode.toBuffer(row.original_url, { type: 'png', margin: 2, scale: 8 });
-        res.type('png').send(qrBuffer);
-      }
-    } catch (e) {
-      res.status(500).send('Error generating QR code');
+    if (row.qr_type === 'mpesa') {
+      const qrBuffer = Buffer.from(row.original_url, 'base64');
+      res.type('png').send(qrBuffer);
+    } else {
+      const qrBuffer = await QRCode.toBuffer(row.original_url, { type: 'png', margin: 2, scale: 8 });
+      res.type('png').send(qrBuffer);
     }
-  });
+  } catch (e) {
+    console.error('Download error:', e);
+    res.status(500).send('Error generating QR code');
+  }
 });
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+initDb().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 });

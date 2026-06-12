@@ -1,58 +1,101 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'database.sqlite');
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Could not connect to database', err);
-  } else {
-    console.log('Connected to SQLite database');
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const db = {
+  async getQRCodes() {
+    const { data, error } = await supabase
+      .from('qr_codes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+
+  async getQRCodeById(id) {
+    const { data, error } = await supabase
+      .from('qr_codes')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async getQRCodeByShortCode(shortCode) {
+    const { data, error } = await supabase
+      .from('qr_codes')
+      .select('*')
+      .eq('short_code', shortCode)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async countQRCodes() {
+    const { count, error } = await supabase
+      .from('qr_codes')
+      .select('*', { count: 'exact', head: true });
+    if (error) throw error;
+    return count;
+  },
+
+  async createQRCode(qrData) {
+    const { data, error } = await supabase
+      .from('qr_codes')
+      .insert([qrData])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async updateQRCode(id, updates) {
+    const { data, error } = await supabase
+      .from('qr_codes')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async incrementClicks(id) {
+    const { error } = await supabase.rpc('increment_clicks', { qr_id: id });
+    if (error) throw error;
+  },
+
+  async deleteQRCode(id) {
+    const { error } = await supabase
+      .from('qr_codes')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async getAnalytics(id) {
+    const { data, error } = await supabase
+      .from('analytics')
+      .select('*')
+      .eq('qr_id', id);
+    if (error) throw error;
+    return data;
+  },
+
+  async addAnalytics(analyticsData) {
+    const { error } = await supabase
+      .from('analytics')
+      .insert([analyticsData]);
+    if (error) throw error;
   }
-});
-
-const init = () => {
-  db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS qr_codes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      qr_id TEXT UNIQUE NOT NULL,
-      original_url TEXT,
-      qr_url TEXT,
-      short_code TEXT UNIQUE NOT NULL,
-      title TEXT,
-      total_clicks INTEGER DEFAULT 0,
-      payment_type TEXT,
-      qr_type TEXT,
-      amount REAL,
-      paybill_number TEXT,
-      till_number TEXT,
-      pochi_number TEXT,
-      reference TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    db.run(`ALTER TABLE qr_codes ADD COLUMN qr_type TEXT`, (err) => {
-      if (err && !err.message.includes('duplicate')) {
-        console.error('Migration error:', err.message);
-      }
-    });
-
-    db.run(`CREATE TABLE IF NOT EXISTS analytics (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      qr_id INTEGER NOT NULL,
-      ip_address TEXT,
-      user_agent TEXT,
-      device_type TEXT,
-      browser_name TEXT,
-      browser_version TEXT,
-      os_name TEXT,
-      country TEXT,
-      city TEXT,
-      referer TEXT,
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (qr_id) REFERENCES qr_codes(id)
-    )`);
-  });
 };
 
-module.exports = { db, init };
+const init = async () => {
+  console.log('Connected to Supabase database');
+};
+
+module.exports = { db, init, supabase };
