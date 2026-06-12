@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Analytics Tracker - Musty Corporations</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div id="login-screen" class="login-screen">
+    <div class="login-box">
+      <h2>QR Analytics Tracker</h2>
+      <p>Powered by Musty Corporations</p>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="password">Enter Password</label>
+          <input type="password" id="password" placeholder="Password" required>
+        </div>
+        <button type="submit">Login</button>
+      </form>
+      <p id="login-error" class="error hidden">Invalid password</p>
+    </div>
+  </div>
+
+  <div class="container hidden" id="main-app">
+    <header>
+      <h1>QR Analytics Tracker</h1>
+      <p>Powered by Musty Corporations</p>
+    </header>
+
+    <section class="create-section">
+      <div class="tab-selector">
+        <button class="tab-btn active" data-tab="qr-generator">QR Generator</button>
+      </div>
+
+      <form id="qr-form" class="qr-form">
+        <h3>Generate QR Code</h3>
+        <div class="form-group">
+          <label for="qr-type">QR Code Type *</label>
+          <select id="qr-type" name="qrType" required>
+            <option value="url">URL</option>
+            <option value="wifi">WiFi</option>
+            <option value="vcard">vCard Contact</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">Email</option>
+            <option value="sms">SMS</option>
+            <option value="phone">Phone Call</option>
+            <option value="youtube">YouTube</option>
+            <option value="maps">Google Maps</option>
+            <option value="social">Social Media</option>
+            <option value="menu">Restaurant Menu</option>
+            <option value="pdf">PDF Document</option>
+            <option value="image">Image</option>
+            <option value="coupon">Coupon Code</option>
+            <option value="feedback">Feedback Form</option>
+            <option value="event">Event</option>
+            <option value="location">GPS Location</option>
+            <option value="spotify">Spotify</option>
+            <option value="appstore">App Store</option>
+            <option value="crypto">Crypto Wallet</option>
+            <option value="text">Plain Text</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="title">Title (optional)</label>
+          <input type="text" id="title" name="title" placeholder="My QR Code">
+        </div>
+
+        <div id="dynamic-fields"></div>
+
+        <button type="submit">Generate QR Code</button>
+      </form>
+
+      <div id="qr-limit-warning" class="warning hidden">Limit reached (10 QR codes). Contact admin for more.</div>
+    </section>
+
+    <section class="qr-list-section">
+      <h2>Your QR Codes</h2>
+      <div id="qr-list" class="qr-grid"></div>
+    </section>
+
+    <section id="stats-modal" class="modal hidden">
+      <div class="modal-content">
+        <span class="close">&times;</span>
+        <div id="stats-container"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
